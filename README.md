@@ -3,7 +3,35 @@
 Stripped + UPX-compressed builds of [`fosrl/newt`](https://github.com/fosrl/newt)
 for constrained Linux targets. Patches only - no upstream source is vendored.
 
+## Quick install (router or Linux host)
+
+SSH in as root and run:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/paltaio/newt-slim/main/install.sh | sh
+```
+
+It detects the arch and init system (procd, systemd, openrc), downloads the
+matching binary, then prompts you to paste the `newt --id ... --secret ...
+--endpoint ...` line and registers a service that auto-starts at boot.
+
+Run multiple instances with `--name`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/paltaio/newt-slim/main/install.sh \
+  | sh -s -- --name newt-home-router
+```
+
+Re-prompt for credentials with `--update`. Pin a release with `--tag 1.12.5`.
+Use `--no-upx` if the UPX binary fails to run.
+
+Credentials live in `/etc/newt/<name>.env` (mode 0600). The service unit is
+`/etc/init.d/<name>` on procd/openrc or `/etc/systemd/system/<name>.service`
+on systemd.
+
 ## Install on an OpenWrt router (GL.iNet, Teltonika RutOS, etc.)
+
+Manual procedure if you'd rather not run the installer.
 
 SSH in and detect the arch:
 
