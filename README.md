@@ -22,6 +22,14 @@ artifacts plus `SHA256SUMS`.
 If a patch fails to apply, the build fails. Refresh `patches/` against the
 new upstream tag and push.
 
+## Container image
+
+```
+docker pull ghcr.io/paltaio/newt-slim:latest
+```
+
+See [`compose.yml`](compose.yml).
+
 ## What `-tags=minimal` removes
 
 OpenTelemetry / Prometheus / gRPC, Docker SDK, GitHub update check,

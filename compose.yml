@@ -1,0 +1,9 @@
+services:
+  newt:
+    image: ghcr.io/paltaio/newt-slim:latest
+    container_name: newt
+    restart: unless-stopped
+    environment:
+      - PANGOLIN_ENDPOINT=https://app.pangolin.net
+      - NEWT_ID=
+      - NEWT_SECRET=

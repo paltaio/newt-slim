@@ -1,0 +1,8 @@
+.git/
+.github/
+out/
+patches/
+scripts/
+Makefile
+README.md
+*.md

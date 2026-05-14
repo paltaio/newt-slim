@@ -42,7 +42,7 @@ jobs:
           if [ -n "$INPUT_TAG" ]; then
             UPSTREAM_TAG="$INPUT_TAG"
           else
-            UPSTREAM_TAG="$(gh api "repos/${UPSTREAM_REPO}/tags?per_page=1" --jq '.[0].name')"
+            UPSTREAM_TAG="$(gh api "repos/${UPSTREAM_REPO}/releases/latest" --jq '.tag_name')"
           fi
           if [ -z "$UPSTREAM_TAG" ] || [ "$UPSTREAM_TAG" = "null" ]; then
             echo "No upstream tag resolved" >&2
@@ -82,7 +82,7 @@ jobs:
       UPSTREAM_TAG: ${{ needs.discover.outputs.upstream_tag }}
     steps:
       - name: Checkout newt-slim (patches)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: slim
 
@@ -101,7 +101,7 @@ jobs:
             am --3way ../slim/patches/*.patch
 
       - name: Set up Go (from upstream .go-version)
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: upstream/.go-version
           cache-dependency-path: upstream/go.sum
@@ -142,24 +142,81 @@ jobs:
           ls -lh ../out/
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bin-${{ matrix.suffix }}
           path: out/*
           if-no-files-found: error
           retention-days: 7
 
-  publish:
+  docker:
     needs: [discover, build]
+    if: needs.discover.outputs.proceed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      UPSTREAM_TAG: ${{ needs.discover.outputs.upstream_tag }}
+      IMAGE: ghcr.io/${{ github.repository_owner }}/newt-slim
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download matrix artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          pattern: bin-*
+          merge-multiple: true
+
+      - name: Stage binaries per platform
+        run: |
+          set -euo pipefail
+          T="${UPSTREAM_TAG}"
+          install -Dm755 "artifacts/newt-${T}-min-linux-amd64.upx"  bin/linux/amd64/newt
+          install -Dm755 "artifacts/newt-${T}-min-linux-arm64.upx"  bin/linux/arm64/newt
+          install -Dm755 "artifacts/newt-${T}-min-linux-armv7.upx"  bin/linux/arm/v7/newt
+          install -Dm755 "artifacts/newt-${T}-min-linux-armv6.upx"  bin/linux/arm/v6/newt
+
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Login to ghcr.io
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v7
+        env:
+          DOCKER_BUILD_SUMMARY: "false"
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64,linux/arm/v7,linux/arm/v6
+          push: true
+          provenance: false
+          tags: |
+            ${{ env.IMAGE }}:${{ env.UPSTREAM_TAG }}
+            ${{ env.IMAGE }}:latest
+
+  publish:
+    needs: [discover, build, docker]
+    if: needs.discover.outputs.proceed == 'true'
     runs-on: ubuntu-latest
     env:
       RELEASE_TAG:  ${{ needs.discover.outputs.release_tag }}
       UPSTREAM_TAG: ${{ needs.discover.outputs.upstream_tag }}
+      IMAGE: ghcr.io/${{ github.repository_owner }}/newt-slim
     steps:
       - name: Collect artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: out
+          pattern: bin-*
           merge-multiple: true
 
       - name: Generate SHA256SUMS
@@ -168,7 +225,7 @@ jobs:
           set -euo pipefail
           sha256sum * | tee SHA256SUMS
 
-      - name: Create release
+      - name: Create or update release
         env:
           GH_TOKEN: ${{ github.token }}
         working-directory: out
@@ -176,14 +233,19 @@ jobs:
           set -euo pipefail
           NOTES="Built from \`${UPSTREAM_REPO}@${UPSTREAM_TAG}\` with the \`minimal\` build tag.
 
-          See [README](https://github.com/${GITHUB_REPOSITORY}/blob/main/README.md) for what is gated and how to verify.
+          \`\`\`
+          docker pull ${IMAGE}:${UPSTREAM_TAG}
+          \`\`\`
 
-          Each target ships two files:
-          - \`newt-${UPSTREAM_TAG}-min-<target>\` - stripped (\`-s -w -trimpath\`)
-          - \`newt-${UPSTREAM_TAG}-min-<target>.upx\` - additionally compressed with \`upx --best --lzma\`"
+          Binaries: \`<name>\` stripped, \`<name>.upx\` UPX-compressed. See \`SHA256SUMS\`."
 
-          gh release create "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "$RELEASE_TAG" \
-            --notes "$NOTES" \
-            *
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --notes "$NOTES"
+            gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --clobber *
+          else
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$RELEASE_TAG" \
+              --notes "$NOTES" \
+              *
+          fi
