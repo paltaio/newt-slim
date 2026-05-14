@@ -107,9 +107,15 @@ jobs:
           cache-dependency-path: upstream/go.sum
 
       - name: Install UPX
+        env:
+          UPX_VERSION: "5.0.1"
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends upx-ucl
+          set -euo pipefail
+          curl -fsSL -o upx.tar.xz \
+            "https://github.com/upx/upx/releases/download/v${UPX_VERSION}/upx-${UPX_VERSION}-amd64_linux.tar.xz"
+          tar -xJf upx.tar.xz
+          sudo install -m 0755 "upx-${UPX_VERSION}-amd64_linux/upx" /usr/local/bin/upx
+          upx --version | head -1
 
       - name: Build minimal binary
         working-directory: upstream
@@ -128,8 +134,11 @@ jobs:
             -trimpath \
             -ldflags "-s -w -buildid= -X main.newtVersion=${UPSTREAM_TAG}+min" \
             -o "../out/${BASE}" .
-          cp "../out/${BASE}" "../out/${BASE}.upx"
-          upx --best --lzma "../out/${BASE}.upx"
+          if upx --best --lzma -o "../out/${BASE}.upx" "../out/${BASE}"; then
+            echo "UPX-compressed ${BASE}.upx"
+          else
+            echo "::warning::UPX does not support ${{ matrix.suffix }}; shipping stripped binary only"
+          fi
           ls -lh ../out/
 
       - name: Upload artifacts
