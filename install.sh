@@ -163,7 +163,8 @@ start_service() {
 EOF
         chmod +x "$SVC"
         "$SVC" enable
-        "$SVC" restart
+        "$SVC" stop >/dev/null 2>&1 || true
+        "$SVC" start
         echo
         echo "service: $SVC"
         echo "logs:    logread -e $NAME -f"
