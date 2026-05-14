@@ -1,0 +1,180 @@
+name: release
+
+on:
+  schedule:
+    # Daily, off-peak.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: "Upstream fosrl/newt tag to build (leave blank to pick the newest)"
+        required: false
+        type: string
+      force:
+        description: "Rebuild even if a release already exists"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  UPSTREAM_REPO: fosrl/newt
+  RELEASE_SUFFIX: "+min"
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      upstream_tag: ${{ steps.pick.outputs.upstream_tag }}
+      release_tag:  ${{ steps.pick.outputs.release_tag }}
+      proceed:      ${{ steps.pick.outputs.proceed }}
+    steps:
+      - name: Pick upstream tag
+        id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.upstream_tag }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_TAG" ]; then
+            UPSTREAM_TAG="$INPUT_TAG"
+          else
+            UPSTREAM_TAG="$(gh api "repos/${UPSTREAM_REPO}/tags?per_page=1" --jq '.[0].name')"
+          fi
+          if [ -z "$UPSTREAM_TAG" ] || [ "$UPSTREAM_TAG" = "null" ]; then
+            echo "No upstream tag resolved" >&2
+            exit 1
+          fi
+          RELEASE_TAG="${UPSTREAM_TAG}${RELEASE_SUFFIX}"
+
+          PROCEED=true
+          if [ "$FORCE" != "true" ]; then
+            if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "Release $RELEASE_TAG already exists, skipping"
+              PROCEED=false
+            fi
+          fi
+          {
+            echo "upstream_tag=$UPSTREAM_TAG"
+            echo "release_tag=$RELEASE_TAG"
+            echo "proceed=$PROCEED"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: discover
+    if: needs.discover.outputs.proceed == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64,   suffix: linux-amd64 }
+          - { goos: linux, goarch: arm64,   suffix: linux-arm64 }
+          - { goos: linux, goarch: arm,     goarm: "7", suffix: linux-armv7 }
+          - { goos: linux, goarch: arm,     goarm: "6", suffix: linux-armv6 }
+          - { goos: linux, goarch: mipsle,  gomips: softfloat, suffix: linux-mipsle-softfloat }
+          - { goos: linux, goarch: mips,    gomips: softfloat, suffix: linux-mips-softfloat }
+          - { goos: linux, goarch: riscv64, suffix: linux-riscv64 }
+    env:
+      UPSTREAM_TAG: ${{ needs.discover.outputs.upstream_tag }}
+    steps:
+      - name: Checkout newt-slim (patches)
+        uses: actions/checkout@v4
+        with:
+          path: slim
+
+      - name: Clone upstream at tag
+        run: |
+          set -euo pipefail
+          git clone --depth=1 --branch "$UPSTREAM_TAG" \
+            "https://github.com/${UPSTREAM_REPO}.git" upstream
+
+      - name: Apply patches
+        working-directory: upstream
+        run: |
+          set -euo pipefail
+          # Identity required by git am.
+          git -c user.email=bot@local -c user.name=newt-slim \
+            am --3way ../slim/patches/*.patch
+
+      - name: Set up Go (from upstream .go-version)
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: upstream/.go-version
+          cache-dependency-path: upstream/go.sum
+
+      - name: Install UPX
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends upx-ucl
+
+      - name: Build minimal binary
+        working-directory: upstream
+        env:
+          CGO_ENABLED: "0"
+          GOOS:   ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM:  ${{ matrix.goarm }}
+          GOMIPS: ${{ matrix.gomips }}
+        run: |
+          set -euo pipefail
+          mkdir -p ../out
+          BASE="newt-${UPSTREAM_TAG}-min-${{ matrix.suffix }}"
+          go build \
+            -tags=minimal \
+            -trimpath \
+            -ldflags "-s -w -buildid= -X main.newtVersion=${UPSTREAM_TAG}+min" \
+            -o "../out/${BASE}" .
+          cp "../out/${BASE}" "../out/${BASE}.upx"
+          upx --best --lzma "../out/${BASE}.upx"
+          ls -lh ../out/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.suffix }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [discover, build]
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG:  ${{ needs.discover.outputs.release_tag }}
+      UPSTREAM_TAG: ${{ needs.discover.outputs.upstream_tag }}
+    steps:
+      - name: Collect artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS
+        working-directory: out
+        run: |
+          set -euo pipefail
+          sha256sum * | tee SHA256SUMS
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: out
+        run: |
+          set -euo pipefail
+          NOTES="Built from \`${UPSTREAM_REPO}@${UPSTREAM_TAG}\` with the \`minimal\` build tag.
+
+          See [README](https://github.com/${GITHUB_REPOSITORY}/blob/main/README.md) for what is gated and how to verify.
+
+          Each target ships two files:
+          - \`newt-${UPSTREAM_TAG}-min-<target>\` - stripped (\`-s -w -trimpath\`)
+          - \`newt-${UPSTREAM_TAG}-min-<target>.upx\` - additionally compressed with \`upx --best --lzma\`"
+
+          gh release create "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$RELEASE_TAG" \
+            --notes "$NOTES" \
+            *

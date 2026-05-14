@@ -1,0 +1,443 @@
+From f1e25ff08c52d589b6e0a2d25ce09cfd771a3ccb Mon Sep 17 00:00:00 2001
+From: Mauricio Allende <mauricio@palta.io>
+Date: Wed, 13 May 2026 21:42:38 -0400
+Subject: [PATCH] Add minimal build tag to gate telemetry, docker, updates, and
+ auth-daemon
+
+Place OpenTelemetry/Prometheus/gRPC, Docker SDK, GitHub update check, and
+PAM auth-daemon code behind a `minimal` build tag and supply no-op stubs
+for the public API so the rest of the tree compiles unchanged. Lets
+operators produce a stripped-down binary via `go build -tags=minimal`
+that omits roughly two thirds of the linked code.
+---
+ authdaemon/connection.go                  |  2 +
+ authdaemon/host_linux.go                  |  2 +-
+ authdaemon/host_stub.go                   |  2 +-
+ authdaemon/minimal.go                     | 45 +++++++++++++
+ authdaemon/principals.go                  |  2 +
+ authdaemon/routes.go                      |  2 +
+ authdaemon/server.go                      |  2 +
+ docker/docker.go                          |  2 +
+ docker/minimal.go                         | 60 +++++++++++++++++
+ internal/telemetry/constants.go           |  6 ++
+ internal/telemetry/metrics.go             |  8 +--
+ internal/telemetry/metrics_test_helper.go |  2 +
+ internal/telemetry/minimal.go             | 82 +++++++++++++++++++++++
+ internal/telemetry/state_view.go          |  2 +
+ internal/telemetry/telemetry.go           |  8 +++
+ main.go                                   |  3 +-
+ updates/minimal.go                        |  5 ++
+ updates/updates.go                        |  2 +
+ 18 files changed, 227 insertions(+), 10 deletions(-)
+ create mode 100644 authdaemon/minimal.go
+ create mode 100644 docker/minimal.go
+ create mode 100644 internal/telemetry/minimal.go
+ create mode 100644 updates/minimal.go
+
+diff --git a/authdaemon/connection.go b/authdaemon/connection.go
+index 3fb44c5..6309ab7 100644
+--- a/authdaemon/connection.go
++++ b/authdaemon/connection.go
+@@ -1,3 +1,5 @@
++//go:build !minimal
++
+ package authdaemon
+ 
+ import (
+diff --git a/authdaemon/host_linux.go b/authdaemon/host_linux.go
+index 12af717..825ce7e 100644
+--- a/authdaemon/host_linux.go
++++ b/authdaemon/host_linux.go
+@@ -1,4 +1,4 @@
+-//go:build linux
++//go:build linux && !minimal
+ 
+ package authdaemon
+ 
+diff --git a/authdaemon/host_stub.go b/authdaemon/host_stub.go
+index 492d2cd..a51fa63 100644
+--- a/authdaemon/host_stub.go
++++ b/authdaemon/host_stub.go
+@@ -1,4 +1,4 @@
+-//go:build !linux
++//go:build !linux && !minimal
+ 
+ package authdaemon
+ 
+diff --git a/authdaemon/minimal.go b/authdaemon/minimal.go
+new file mode 100644
+index 0000000..835c5a3
+--- /dev/null
++++ b/authdaemon/minimal.go
+@@ -0,0 +1,45 @@
++//go:build minimal
++
++package authdaemon
++
++import (
++	"context"
++	"errors"
++)
++
++type Config struct {
++	DisableHTTPS           bool
++	PresharedKey           string
++	PrincipalsFilePath     string
++	CACertPath             string
++	Force                  bool
++	GenerateRandomPassword bool
++}
++
++type ConnectionMetadata struct {
++	SudoMode     string
++	SudoCommands []string
++	Homedir      bool
++	Groups       []string
++}
++
++type ConnectionRequest struct {
++	CaCert   string
++	NiceId   string
++	Username string
++	Metadata ConnectionMetadata
++}
++
++type Server struct{}
++
++func NewServer(Config) (*Server, error) {
++	return nil, errors.New("auth-daemon support disabled")
++}
++
++func (*Server) Run(context.Context) error { return errors.New("auth-daemon support disabled") }
++
++func (*Server) ProcessConnection(ConnectionRequest) {}
++
++func GetPrincipals(string, string) ([]string, error) {
++	return nil, errors.New("auth-daemon support disabled")
++}
+diff --git a/authdaemon/principals.go b/authdaemon/principals.go
+index cbfca80..4e58406 100644
+--- a/authdaemon/principals.go
++++ b/authdaemon/principals.go
+@@ -1,3 +1,5 @@
++//go:build !minimal
++
+ package authdaemon
+ 
+ import (
+diff --git a/authdaemon/routes.go b/authdaemon/routes.go
+index 8457c60..f2bf827 100644
+--- a/authdaemon/routes.go
++++ b/authdaemon/routes.go
+@@ -1,3 +1,5 @@
++//go:build !minimal
++
+ package authdaemon
+ 
+ import (
+diff --git a/authdaemon/server.go b/authdaemon/server.go
+index 224ac9e..3ddb229 100644
+--- a/authdaemon/server.go
++++ b/authdaemon/server.go
+@@ -1,3 +1,5 @@
++//go:build !minimal
++
+ package authdaemon
+ 
+ import (
+diff --git a/docker/docker.go b/docker/docker.go
+index 281c594..b9317d9 100644
+--- a/docker/docker.go
++++ b/docker/docker.go
+@@ -1,3 +1,5 @@
++//go:build !minimal
++
+ package docker
+ 
+ import (
+diff --git a/docker/minimal.go b/docker/minimal.go
+new file mode 100644
+index 0000000..66a6b77
+--- /dev/null
++++ b/docker/minimal.go
+@@ -0,0 +1,60 @@
++//go:build minimal
++
++package docker
++
++import "errors"
++
++type Container struct {
++	ID       string             `json:"id"`
++	Name     string             `json:"name"`
++	Image    string             `json:"image"`
++	State    string             `json:"state"`
++	Status   string             `json:"status"`
++	Ports    []Port             `json:"ports"`
++	Labels   map[string]string  `json:"labels"`
++	Created  int64              `json:"created"`
++	Networks map[string]Network `json:"networks"`
++	Hostname string             `json:"hostname"`
++}
++
++type Port struct {
++	PrivatePort int    `json:"privatePort"`
++	PublicPort  int    `json:"publicPort,omitempty"`
++	Type        string `json:"type"`
++	IP          string `json:"ip,omitempty"`
++}
++
++type Network struct {
++	NetworkID           string   `json:"networkId"`
++	EndpointID          string   `json:"endpointId"`
++	Gateway             string   `json:"gateway,omitempty"`
++	IPAddress           string   `json:"ipAddress,omitempty"`
++	IPPrefixLen         int      `json:"ipPrefixLen,omitempty"`
++	IPv6Gateway         string   `json:"ipv6Gateway,omitempty"`
++	GlobalIPv6Address   string   `json:"globalIPv6Address,omitempty"`
++	GlobalIPv6PrefixLen int      `json:"globalIPv6PrefixLen,omitempty"`
++	MacAddress          string   `json:"macAddress,omitempty"`
++	Aliases             []string `json:"aliases,omitempty"`
++	DNSNames            []string `json:"dnsNames,omitempty"`
++}
++
++type EventCallback func(containers []Container)
++
++type EventMonitor struct{}
++
++func CheckSocket(string) bool { return false }
++
++func IsWithinHostNetwork(string, string, int) (bool, error) {
++	return false, errors.New("docker support disabled")
++}
++
++func ListContainers(string, bool) ([]Container, error) {
++	return nil, errors.New("docker support disabled")
++}
++
++func NewEventMonitor(string, bool, EventCallback) (*EventMonitor, error) {
++	return nil, errors.New("docker support disabled")
++}
++
++func (*EventMonitor) Start() error { return errors.New("docker support disabled") }
++func (*EventMonitor) Stop()        {}
+diff --git a/internal/telemetry/constants.go b/internal/telemetry/constants.go
+index bc117bf..8726016 100644
+--- a/internal/telemetry/constants.go
++++ b/internal/telemetry/constants.go
+@@ -17,3 +17,9 @@ const (
+ 	ReasonConfigChange   = "config_change"
+ 	ReasonError          = "error"
+ )
++
++// Proxy connection lifecycle events.
++const (
++	ProxyConnectionOpened = "opened"
++	ProxyConnectionClosed = "closed"
++)
+diff --git a/internal/telemetry/metrics.go b/internal/telemetry/metrics.go
+index 6c34724..6430ba1 100644
+--- a/internal/telemetry/metrics.go
++++ b/internal/telemetry/metrics.go
+@@ -1,3 +1,5 @@
++//go:build !minimal
++
+ package telemetry
+ 
+ import (
+@@ -70,12 +72,6 @@ var (
+ 	wsConnectedState atomic.Int64
+ )
+ 
+-// Proxy connection lifecycle events.
+-const (
+-	ProxyConnectionOpened = "opened"
+-	ProxyConnectionClosed = "closed"
+-)
+-
+ // attrsWithSite appends site/region labels only when explicitly enabled to keep
+ // label cardinality low by default.
+ func attrsWithSite(extra ...attribute.KeyValue) []attribute.KeyValue {
+diff --git a/internal/telemetry/metrics_test_helper.go b/internal/telemetry/metrics_test_helper.go
+index 16aa1a3..6050cba 100644
+--- a/internal/telemetry/metrics_test_helper.go
++++ b/internal/telemetry/metrics_test_helper.go
+@@ -1,3 +1,5 @@
++//go:build !minimal
++
+ package telemetry
+ 
+ import (
+diff --git a/internal/telemetry/minimal.go b/internal/telemetry/minimal.go
+new file mode 100644
+index 0000000..35a0411
+--- /dev/null
++++ b/internal/telemetry/minimal.go
+@@ -0,0 +1,82 @@
++//go:build minimal
++
++package telemetry
++
++import (
++	"context"
++	"net/http"
++	"time"
++
++	"go.opentelemetry.io/otel/attribute"
++	"go.opentelemetry.io/otel/metric"
++)
++
++// Config is a no-op placeholder for the minimal build.
++type Config struct {
++	ServiceName          string
++	ServiceVersion       string
++	SiteID               string
++	Region               string
++	PromEnabled          bool
++	OTLPEnabled          bool
++	OTLPEndpoint         string
++	OTLPInsecure         bool
++	MetricExportInterval time.Duration
++	AdminAddr            string
++	BuildVersion         string
++	BuildCommit          string
++}
++
++// Setup is a no-op placeholder for the minimal build.
++type Setup struct {
++	PrometheusHandler http.Handler
++}
++
++// StateView mirrors the full-build interface so callers compile unchanged.
++type StateView interface {
++	ListSites() []string
++	Online(siteID string) (online bool, ok bool)
++	LastHeartbeat(siteID string) (t time.Time, ok bool)
++	ActiveSessions(siteID string) (n int64, ok bool)
++}
++
++func FromEnv() Config                                    { return Config{} }
++func Init(context.Context, Config) (*Setup, error)       { return &Setup{}, nil }
++func (s *Setup) Shutdown(context.Context) error          { return nil }
++func WrapHTTPHandler(h http.Handler, _ string) http.Handler { return h }
++
++func UpdateSiteInfo(string, string)                  {}
++func RegisterStateView(StateView)                    {}
++func RegisterBuildInfo(string, string)               {}
++func SetObservableCallback(func(context.Context, metric.Observer) error)      {}
++func SetProxyObservableCallback(func(context.Context, metric.Observer) error) {}
++
++func SiteLabelKVs() []attribute.KeyValue { return nil }
++func ShouldIncludeTunnelID() bool        { return false }
++func ShouldIncludeSiteLabels() bool      { return false }
++
++func IncConfigReload(context.Context, string)                                  {}
++func IncSiteRegistration(context.Context, string)                              {}
++func AddTunnelBytes(context.Context, string, string, int64)                    {}
++func AddTunnelBytesSet(context.Context, int64, attribute.Set)                  {}
++func ObserveWSConnectLatency(context.Context, float64, string, string)         {}
++func IncWSMessage(context.Context, string, string)                             {}
++func IncWSDisconnect(context.Context, string, string)                          {}
++func IncWSKeepaliveFailure(context.Context, string)                            {}
++func SetWSConnectionState(bool)                                                {}
++func IncWSReconnect(context.Context, string)                                   {}
++func ObserveWSSessionDuration(context.Context, float64, string)                {}
++func ObserveProxyActiveConnsObs(metric.Observer, int64, []attribute.KeyValue)  {}
++func ObserveProxyBufferBytesObs(metric.Observer, int64, []attribute.KeyValue)  {}
++func ObserveProxyAsyncBacklogObs(metric.Observer, int64, []attribute.KeyValue) {}
++func IncProxyDrops(context.Context, string, string)                            {}
++func IncProxyAccept(context.Context, string, string, string, string)           {}
++func ObserveProxyConnectionDuration(context.Context, string, string, string, float64) {
++}
++func IncProxyConnectionEvent(context.Context, string, string, string) {}
++func ObserveConfigApply(context.Context, string, string, float64)     {}
++func IncCertRotation(context.Context, string)                         {}
++func ObserveTunnelLatency(context.Context, string, string, float64)   {}
++func IncReconnect(context.Context, string, string, string)            {}
++func IncConnAttempt(context.Context, string, string)                  {}
++func IncConnError(context.Context, string, string)                    {}
+diff --git a/internal/telemetry/state_view.go b/internal/telemetry/state_view.go
+index 6c6b6de..d31677e 100644
+--- a/internal/telemetry/state_view.go
++++ b/internal/telemetry/state_view.go
+@@ -1,3 +1,5 @@
++//go:build !minimal
++
+ package telemetry
+ 
+ import (
+diff --git a/internal/telemetry/telemetry.go b/internal/telemetry/telemetry.go
+index 3d47a61..01769a0 100644
+--- a/internal/telemetry/telemetry.go
++++ b/internal/telemetry/telemetry.go
+@@ -1,3 +1,5 @@
++//go:build !minimal
++
+ package telemetry
+ 
+ import (
+@@ -11,6 +13,7 @@ import (
+ 
+ 	promclient "github.com/prometheus/client_golang/prometheus"
+ 	"github.com/prometheus/client_golang/prometheus/promhttp"
++	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+ 	"go.opentelemetry.io/contrib/instrumentation/runtime"
+ 	"go.opentelemetry.io/otel"
+ 	"go.opentelemetry.io/otel/attribute"
+@@ -24,6 +27,11 @@ import (
+ 	"google.golang.org/grpc/credentials"
+ )
+ 
++// WrapHTTPHandler wraps an http.Handler with otelhttp instrumentation.
++func WrapHTTPHandler(h http.Handler, name string) http.Handler {
++	return otelhttp.NewHandler(h, name)
++}
++
+ // Config controls telemetry initialization via env flags.
+ //
+ // Defaults align with the issue requirements:
+diff --git a/main.go b/main.go
+index 448f71d..e3f0b7b 100644
+--- a/main.go
++++ b/main.go
+@@ -32,7 +32,6 @@ import (
+ 
+ 	"github.com/fosrl/newt/internal/state"
+ 	"github.com/fosrl/newt/internal/telemetry"
+-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+ 	"golang.zx2c4.com/wireguard/conn"
+ 	"golang.zx2c4.com/wireguard/device"
+ 	"golang.zx2c4.com/wireguard/tun"
+@@ -560,7 +559,7 @@ func runNewtMain(ctx context.Context) {
+ 		}
+ 		admin := &http.Server{
+ 			Addr:              tcfg.AdminAddr,
+-			Handler:           otelhttp.NewHandler(mux, "newt-admin"),
++			Handler:           telemetry.WrapHTTPHandler(mux, "newt-admin"),
+ 			ReadTimeout:       5 * time.Second,
+ 			WriteTimeout:      10 * time.Second,
+ 			ReadHeaderTimeout: 5 * time.Second,
+diff --git a/updates/minimal.go b/updates/minimal.go
+new file mode 100644
+index 0000000..7aead02
+--- /dev/null
++++ b/updates/minimal.go
+@@ -0,0 +1,5 @@
++//go:build minimal
++
++package updates
++
++func CheckForUpdate(string, string, string) error { return nil }
+diff --git a/updates/updates.go b/updates/updates.go
+index 21666ac..2205958 100644
+--- a/updates/updates.go
++++ b/updates/updates.go
+@@ -1,3 +1,5 @@
++//go:build !minimal
++
+ package updates
+ 
+ import (
+-- 
+2.53.0
+
