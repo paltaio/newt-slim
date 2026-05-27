@@ -5,7 +5,7 @@ for constrained Linux targets. Patches only - no upstream source is vendored.
 
 ## Quick install (router or Linux host)
 
-Run:
+Run once:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/paltaio/newt-slim/main/install.sh | sh
@@ -17,11 +17,17 @@ matching binary, then prompts you to paste the `newt --id ... --secret ...
 before installing a user service. If Docker is available, it can install a
 container instead.
 
+For options, download the installer:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/paltaio/newt-slim/main/install.sh
+chmod +x install.sh
+```
+
 Run multiple instances with `--name`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/paltaio/newt-slim/main/install.sh \
-  | sh -s -- --name newt-home-router
+./install.sh --name newt-home-router
 ```
 
 Re-prompt for credentials with `--update`. Pin a release with `--tag 1.12.5`.
@@ -34,8 +40,7 @@ on systemd.
 Install as a Docker container with `--docker`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/paltaio/newt-slim/main/install.sh \
-  | sh -s -- --docker
+./install.sh --docker
 ```
 
 The Docker installer creates a compose file when `docker compose` is available
@@ -46,89 +51,24 @@ set.
 Stop or uninstall the native service:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/paltaio/newt-slim/main/install.sh \
-  | sh -s -- --stop
+./install.sh --stop
 
-curl -fsSL https://raw.githubusercontent.com/paltaio/newt-slim/main/install.sh \
-  | sh -s -- --uninstall
+./install.sh --uninstall
 ```
 
 Stop or uninstall the Docker container:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/paltaio/newt-slim/main/install.sh \
-  | sh -s -- --docker --stop
+./install.sh --docker --stop
 
-curl -fsSL https://raw.githubusercontent.com/paltaio/newt-slim/main/install.sh \
-  | sh -s -- --docker --uninstall
+./install.sh --docker --uninstall
 ```
 
 Add `--name <name>` to target a named instance.
 
-## Install on an OpenWrt router (GL.iNet, Teltonika RutOS, etc.)
+## Manual install
 
-Manual procedure if you'd rather not run the installer.
-
-SSH in and detect the arch:
-
-```sh
-ssh root@192.168.8.1
-uname -m
-opkg print-architecture | awk '{print $2}'
-```
-
-Pick the matching asset suffix:
-
-| `uname -m` / opkg arch         | asset suffix             |
-|--------------------------------|--------------------------|
-| `mips` + `mips_*`              | `linux-mips-softfloat`   |
-| `mips` + `mipsel_*`            | `linux-mipsle-softfloat` |
-| `armv7l` / `arm_cortex-a*`     | `linux-armv7`            |
-| `aarch64` / `aarch64_*`        | `linux-arm64`            |
-
-Download and install (set `TAG` and `SUFFIX`):
-
-```sh
-TAG=1.12.5
-SUFFIX=linux-armv7
-wget -O /usr/bin/newt \
-  "https://github.com/paltaio/newt-slim/releases/download/${TAG}%2Bmin/newt-${TAG}-min-${SUFFIX}.upx"
-chmod +x /usr/bin/newt
-```
-
-Create `/etc/init.d/newt` (procd):
-
-```sh
-#!/bin/sh /etc/rc.common
-USE_PROCD=1
-START=95
-STOP=10
-
-NEWT_ID="your-newt-id"
-NEWT_SECRET="your-newt-secret"
-NEWT_ENDPOINT="https://pangolin.example.com"
-
-start_service() {
-    procd_open_instance
-    procd_set_param command /usr/bin/newt \
-        --id "$NEWT_ID" \
-        --secret "$NEWT_SECRET" \
-        --endpoint "$NEWT_ENDPOINT"
-    procd_set_param respawn
-    procd_set_param stdout 1
-    procd_set_param stderr 1
-    procd_close_instance
-}
-```
-
-Enable and start:
-
-```sh
-chmod +x /etc/init.d/newt
-/etc/init.d/newt enable
-/etc/init.d/newt start
-logread -e newt -f
-```
+See [`docs/openwrt-manual-install.md`](docs/openwrt-manual-install.md).
 
 ## What `-tags=minimal` removes
 
