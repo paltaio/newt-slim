@@ -1,4 +1,4 @@
-From f1e25ff08c52d589b6e0a2d25ce09cfd771a3ccb Mon Sep 17 00:00:00 2001
+From c778f11a37ca67866123ff5e71809bb958fcd8a5 Mon Sep 17 00:00:00 2001
 From: Mauricio Allende <mauricio@palta.io>
 Date: Wed, 13 May 2026 21:42:38 -0400
 Subject: [PATCH] Add minimal build tag to gate telemetry, docker, updates, and
@@ -35,7 +35,7 @@ that omits roughly two thirds of the linked code.
  create mode 100644 updates/minimal.go
 
 diff --git a/authdaemon/connection.go b/authdaemon/connection.go
-index 3fb44c5..6309ab7 100644
+index 82ddae6..30be0e1 100644
 --- a/authdaemon/connection.go
 +++ b/authdaemon/connection.go
 @@ -1,3 +1,5 @@
@@ -126,7 +126,7 @@ index cbfca80..4e58406 100644
  
  import (
 diff --git a/authdaemon/routes.go b/authdaemon/routes.go
-index 8457c60..f2bf827 100644
+index 3d1be3e..d505596 100644
 --- a/authdaemon/routes.go
 +++ b/authdaemon/routes.go
 @@ -1,3 +1,5 @@
@@ -136,7 +136,7 @@ index 8457c60..f2bf827 100644
  
  import (
 diff --git a/authdaemon/server.go b/authdaemon/server.go
-index 224ac9e..3ddb229 100644
+index 0bd114b..7343f20 100644
 --- a/authdaemon/server.go
 +++ b/authdaemon/server.go
 @@ -1,3 +1,5 @@
@@ -146,7 +146,7 @@ index 224ac9e..3ddb229 100644
  
  import (
 diff --git a/docker/docker.go b/docker/docker.go
-index 281c594..b9317d9 100644
+index 8033c67..c334a09 100644
 --- a/docker/docker.go
 +++ b/docker/docker.go
 @@ -1,3 +1,5 @@
@@ -397,18 +397,18 @@ index 3d47a61..01769a0 100644
  //
  // Defaults align with the issue requirements:
 diff --git a/main.go b/main.go
-index 448f71d..e3f0b7b 100644
+index 38c0583..0fed564 100644
 --- a/main.go
 +++ b/main.go
-@@ -32,7 +32,6 @@ import (
- 
- 	"github.com/fosrl/newt/internal/state"
- 	"github.com/fosrl/newt/internal/telemetry"
+@@ -18,7 +18,6 @@ import (
+ 	newtpkg "github.com/fosrl/newt/newt"
+ 	"github.com/fosrl/newt/updates"
+ 	"github.com/fosrl/newt/websocket"
 -	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
- 	"golang.zx2c4.com/wireguard/conn"
- 	"golang.zx2c4.com/wireguard/device"
- 	"golang.zx2c4.com/wireguard/tun"
-@@ -560,7 +559,7 @@ func runNewtMain(ctx context.Context) {
+ )
+ 
+ var (
+@@ -149,7 +148,7 @@ func runNewtMain(ctx context.Context) {
  		}
  		admin := &http.Server{
  			Addr:              tcfg.AdminAddr,
@@ -429,7 +429,7 @@ index 0000000..7aead02
 +
 +func CheckForUpdate(string, string, string) error { return nil }
 diff --git a/updates/updates.go b/updates/updates.go
-index 21666ac..2205958 100644
+index 10bf38e..5fd4e10 100644
 --- a/updates/updates.go
 +++ b/updates/updates.go
 @@ -1,3 +1,5 @@
