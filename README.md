@@ -66,6 +66,41 @@ Stop or uninstall the Docker container:
 
 Add `--name <name>` to target a named instance.
 
+## Android
+
+Works in four setups, each starting newt at boot. Anything else fails.
+
+| setup | what gets installed |
+|---|---|
+| Termux, with or without root | `~/.termux/boot/<name>.sh`, run by the Termux:Boot app |
+| Magisk, KernelSU, APatch | a module at `/data/adb/modules/<name>` |
+| `adb root` on a userdebug build | `/system/etc/init/<name>.rc`, started at `post-fs-data` |
+
+Run the installer from the shell you have, `adb shell` plus `su` or a Termux
+session:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/paltaio/newt-slim/main/install.sh | sh
+```
+
+Termux needs the Termux:Boot app installed and opened once. The boot script
+takes a wake lock and logs to `~/.config/newt/<name>.log`.
+
+The `adb root` path remounts `/system` writable. When verity was still
+enabled, the remount asks for a reboot; reboot and run the installer again.
+The service is picked up on the next reboot.
+
+The module and `adb root` paths log to logcat:
+
+```sh
+adb logcat -s newt
+```
+
+Android has no `/etc/resolv.conf`, so newt sends DNS queries to its `--dns`
+server, 9.9.9.9 by default.
+
+`--stop`, `--uninstall`, and `--update` work the same way.
+
 ## Manual install
 
 See [`docs/openwrt-manual-install.md`](docs/openwrt-manual-install.md).

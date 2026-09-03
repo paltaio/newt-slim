@@ -23,6 +23,11 @@ UNINSTALL=0
 DOCKER_CMD=
 DOCKER_COMPOSE=
 USER_INSTALL=0
+ANDROID=0
+ANDROID_MODE=
+MOD_DIR=
+REBOOT_NOTE=0
+TERMUX_NOTE=0
 
 usage() {
     cat <<EOF
@@ -352,7 +357,114 @@ native_uninstall() {
     fi
 }
 
-if [ "$DOCKER" -eq 0 ] && [ "$(id -u)" -ne 0 ]; then
+android_system_writable() {
+    touch /system/etc/.newt-rw 2>/dev/null || return 1
+    rm -f /system/etc/.newt-rw
+}
+
+android_system_rw() {
+    android_system_writable && return 0
+    if command -v remount >/dev/null 2>&1; then
+        remount || true
+    else
+        mount -o remount,rw /system 2>/dev/null || mount -o remount,rw / 2>/dev/null || true
+    fi
+    android_system_writable && return 0
+    echo "/system is read-only. If remount disabled verity, reboot and run the installer again." >&2
+    exit 1
+}
+
+android_init_known() {
+    [ -n "$(getprop "init.svc.${NAME}" 2>/dev/null)" ]
+}
+
+termux_stop() {
+    for f in "${ETC_DIR}/${NAME}.loop.pid" "${ETC_DIR}/${NAME}.pid"; do
+        [ -f "$f" ] || continue
+        kill "$(cat "$f")" 2>/dev/null || true
+        rm -f "$f"
+    done
+}
+
+android_stop() {
+    if [ "$ANDROID_MODE" = init ]; then
+        android_init_known && stop "$NAME"
+        return
+    fi
+    if [ "$ANDROID_MODE" = termux ]; then
+        termux_stop
+        return
+    fi
+    if [ -f "$MOD_DIR/pid" ]; then
+        kill "$(cat "$MOD_DIR/pid")" 2>/dev/null || true
+        rm -f "$MOD_DIR/pid"
+    fi
+    pkill -f "^$BIN" 2>/dev/null || true
+}
+
+android_uninstall() {
+    if [ "$ANDROID_MODE" = termux ]; then
+        termux_stop
+        rm -f "${HOME}/.termux/boot/${NAME}.sh" "$ENV_FILE" "${ETC_DIR}/${NAME}.log"
+        echo "removed boot script: $NAME"
+        if [ -z "$(find "$ETC_DIR" -type f -name '*.env' 2>/dev/null | sed -n '1p')" ]; then
+            rm -f "$BIN"
+            rmdir "$ETC_DIR" 2>/dev/null || true
+            echo "removed binary: $BIN"
+        fi
+        return
+    fi
+    if [ "$ANDROID_MODE" = init ]; then
+        android_system_rw
+        android_stop
+        rm -f "/system/etc/init/${NAME}.rc" "${ETC_DIR}/${NAME}.sh" "$ENV_FILE"
+        echo "removed service: $NAME"
+        if [ -z "$(find "$ETC_DIR" -type f -name '*.env' 2>/dev/null | sed -n '1p')" ]; then
+            rm -f "$BIN"
+            rmdir "$ETC_DIR" 2>/dev/null || true
+            echo "removed binary: $BIN"
+        fi
+        return
+    fi
+    if [ -d "$MOD_DIR" ]; then
+        android_stop
+        rm -rf "$MOD_DIR"
+        echo "removed module: $MOD_DIR"
+    else
+        echo "module not found: $MOD_DIR"
+    fi
+}
+
+if [ -f /system/build.prop ]; then
+    ANDROID=1
+    [ "$DOCKER" -eq 0 ] || { echo "--docker is not available on Android" >&2; exit 2; }
+    if [ -n "${TERMUX_VERSION:-}" ]; then
+        ANDROID_MODE=termux
+        BIN="${PREFIX}/bin/newt"
+        ETC_DIR="${HOME}/.config/newt"
+        export TMPDIR="${TMPDIR:-${PREFIX}/tmp}"
+    elif [ "$(id -u)" -ne 0 ]; then
+        echo "must run as root: use 'adb root' or 'su' in adb shell, or run inside Termux" >&2
+        exit 1
+    elif [ -d /data/adb/modules ]; then
+        export TMPDIR="${TMPDIR:-/data/local/tmp}"
+        ANDROID_MODE=module
+        MOD_DIR="/data/adb/modules/${NAME}"
+        BIN="${MOD_DIR}/newt"
+        ETC_DIR=$MOD_DIR
+    elif [ "$(getprop ro.debuggable 2>/dev/null)" = 1 ]; then
+        export TMPDIR="${TMPDIR:-/data/local/tmp}"
+        ANDROID_MODE=init
+        BIN=/system/bin/newt
+        ETC_DIR=/system/etc/newt
+    else
+        echo "no root manager found and this is not a userdebug build." >&2
+        echo "install Magisk, KernelSU, or APatch, or use a userdebug build with 'adb root'." >&2
+        exit 1
+    fi
+fi
+
+if [ "$DOCKER" -eq 0 ] && [ "$ANDROID" -eq 0 ] && [ "$(id -u)" -ne 0 ]; then
     if [ "$STOP" -eq 1 ] || [ "$UNINSTALL" -eq 1 ]; then
         set_user_native_paths
     elif ask_yes "Install newt as a user service?"; then
@@ -387,17 +499,26 @@ if [ "$DOCKER" -eq 1 ]; then
 fi
 
 if [ "$USER_INSTALL" -eq 0 ]; then
-    [ "$(id -u)" -eq 0 ] || { echo "must run as root" >&2; exit 1; }
+    [ "$ANDROID" -eq 1 ] || [ "$(id -u)" -eq 0 ] || { echo "must run as root" >&2; exit 1; }
     ENV_FILE="${ETC_DIR}/${NAME}.env"
 fi
 
 if [ "$STOP" -eq 1 ]; then
-    native_stop
+    if [ "$ANDROID" -eq 1 ]; then
+        android_stop
+        echo "stopped service: $NAME"
+    else
+        native_stop
+    fi
     exit 0
 fi
 
 if [ "$UNINSTALL" -eq 1 ]; then
-    native_uninstall
+    if [ "$ANDROID" -eq 1 ]; then
+        android_uninstall
+    else
+        native_uninstall
+    fi
     exit 0
 fi
 
@@ -424,6 +545,11 @@ esac
 if [ "$USER_INSTALL" -eq 1 ]; then
     command -v systemctl >/dev/null 2>&1 || { echo "systemctl is required for user install" >&2; exit 1; }
     INIT=systemd-user
+elif [ "$ANDROID" -eq 1 ]; then
+    INIT="android-${ANDROID_MODE}"
+    if [ "$ANDROID_MODE" = init ]; then
+        android_system_rw
+    fi
 elif [ -f /etc/openwrt_release ] || [ -x /sbin/procd ]; then
     INIT=procd
 elif [ -d /run/systemd/system ]; then
@@ -479,6 +605,93 @@ fi
 
 # --- service ---
 case "$INIT" in
+    android-init)
+        SVC="/system/etc/init/${NAME}.rc"
+        WRAP="${ETC_DIR}/${NAME}.sh"
+        cat > "$WRAP" <<EOF
+#!/system/bin/sh
+. "$ENV_FILE"
+export NEWT_ID NEWT_SECRET PANGOLIN_ENDPOINT
+export SSL_CERT_DIR=/apex/com.android.conscrypt/cacerts:/system/etc/security/cacerts
+"$BIN" 2>&1 | while IFS= read -r line; do log -t "$NAME" "\$line"; done
+EOF
+        chmod 0755 "$WRAP"
+        # init needs a seclabel to run this; the su domain exists with
+        # rules only on userdebug and eng builds.
+        cat > "$SVC" <<EOF
+service $NAME /system/bin/sh $WRAP
+    user root
+    seclabel u:r:su:s0
+    disabled
+
+on post-fs-data
+    start $NAME
+EOF
+        chmod 0644 "$SVC"
+        chcon u:object_r:system_file:s0 "$BIN" "$WRAP" "$SVC" "$ETC_DIR" 2>/dev/null || true
+        if android_init_known; then
+            stop "$NAME"
+            start "$NAME"
+        else
+            REBOOT_NOTE=1
+        fi
+        LOGS_CMD="logcat -s $NAME"
+        ;;
+    android-module)
+        SVC="${MOD_DIR}/service.sh"
+        # shellcheck disable=SC2046
+        set -- $(printf '%s\n' "$VER" | tr -c '0-9\n' ' ')
+        VER_CODE=$(( ${1:-0} * 10000 + ${2:-0} * 100 + ${3:-0} ))
+        cat > "${MOD_DIR}/module.prop" <<EOF
+id=$NAME
+name=newt ($NAME)
+version=$VER
+versionCode=$VER_CODE
+author=paltaio
+description=Pangolin tunnel client. Starts at boot.
+EOF
+        rm -rf "${MOD_DIR}/system"
+        cat > "$SVC" <<EOF
+#!/system/bin/sh
+MODDIR=\${0%/*}
+. "\$MODDIR/${NAME}.env"
+export NEWT_ID NEWT_SECRET PANGOLIN_ENDPOINT
+export SSL_CERT_DIR=/apex/com.android.conscrypt/cacerts:/system/etc/security/cacerts
+while :; do
+    "\$MODDIR/newt" 2>&1 | while IFS= read -r line; do log -t "$NAME" "\$line"; done
+    sleep 5
+done &
+echo \$! > "\$MODDIR/pid"
+EOF
+        chmod 0755 "$SVC"
+        android_stop
+        nohup sh "$SVC" >/dev/null 2>&1
+        LOGS_CMD="logcat -s $NAME"
+        ;;
+    android-termux)
+        SVC="${HOME}/.termux/boot/${NAME}.sh"
+        LOG="${ETC_DIR}/${NAME}.log"
+        mkdir -p "${HOME}/.termux/boot"
+        cat > "$SVC" <<EOF
+#!${PREFIX}/bin/sh
+termux-wake-lock
+. "$ENV_FILE"
+export NEWT_ID NEWT_SECRET PANGOLIN_ENDPOINT
+export SSL_CERT_DIR=/apex/com.android.conscrypt/cacerts:/system/etc/security/cacerts
+while :; do
+    "$BIN" > "$LOG" 2>&1 &
+    echo \$! > "${ETC_DIR}/${NAME}.pid"
+    wait \$!
+    sleep 5
+done &
+echo \$! > "${ETC_DIR}/${NAME}.loop.pid"
+EOF
+        chmod 0755 "$SVC"
+        termux_stop
+        nohup sh "$SVC" >/dev/null 2>&1
+        LOGS_CMD="tail -f $LOG"
+        TERMUX_NOTE=1
+        ;;
     procd)
         SVC="/etc/init.d/${NAME}"
         cat > "$SVC" <<EOF
@@ -591,3 +804,5 @@ echo "  service: $SVC"
 echo "  binary: $BIN"
 echo "  credentials: $ENV_FILE"
 echo "  logs: $LOGS_CMD"
+[ "$REBOOT_NOTE" -eq 0 ] || echo "reboot to start newt."
+[ "$TERMUX_NOTE" -eq 0 ] || echo "install the Termux:Boot app and open it once so the boot script runs."
