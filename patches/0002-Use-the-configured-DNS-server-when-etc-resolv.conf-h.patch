@@ -1,0 +1,78 @@
+From d645bf6db5c832ab7486e8a9e67fd148adca9b33 Mon Sep 17 00:00:00 2001
+From: Mauricio Allende <mauricio@palta.io>
+Date: Thu, 3 Sep 2026 12:05:15 -0400
+Subject: [PATCH] Use the configured DNS server when /etc/resolv.conf has no
+ nameserver
+
+---
+ main.go     |  1 +
+ resolver.go | 45 +++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 46 insertions(+)
+ create mode 100644 resolver.go
+
+diff --git a/main.go b/main.go
+index 0fed564..a5bbf5f 100644
+--- a/main.go
++++ b/main.go
+@@ -92,6 +92,7 @@ func runNewtMain(ctx context.Context) {
+ 	if cfg.DNS != "" {
+ 		logger.Debug("DNS: %v", cfg.DNS)
+ 	}
++	useFallbackResolver(cfg.DNS)
+ 	if cfg.DockerSocket != "" {
+ 		logger.Debug("Docker Socket: %v", cfg.DockerSocket)
+ 	}
+diff --git a/resolver.go b/resolver.go
+new file mode 100644
+index 0000000..57f8f37
+--- /dev/null
++++ b/resolver.go
+@@ -0,0 +1,45 @@
++package main
++
++import (
++	"bufio"
++	"context"
++	"net"
++	"os"
++	"strings"
++	"time"
++)
++
++// hasNameserver reports whether /etc/resolv.conf lists a nameserver. Without
++// one, Go's resolver queries 127.0.0.1:53, which nothing answers on Android.
++func hasNameserver() bool {
++	f, err := os.Open("/etc/resolv.conf")
++	if err != nil {
++		return false
++	}
++	defer f.Close()
++	s := bufio.NewScanner(f)
++	for s.Scan() {
++		if strings.HasPrefix(strings.TrimSpace(s.Text()), "nameserver") {
++			return true
++		}
++	}
++	return false
++}
++
++// useFallbackResolver routes all name lookups to server when the system has
++// no usable resolver configuration.
++func useFallbackResolver(server string) {
++	if server == "" || hasNameserver() {
++		return
++	}
++	if _, _, err := net.SplitHostPort(server); err != nil {
++		server = net.JoinHostPort(server, "53")
++	}
++	net.DefaultResolver = &net.Resolver{
++		PreferGo: true,
++		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
++			d := net.Dialer{Timeout: 5 * time.Second}
++			return d.DialContext(ctx, network, server)
++		},
++	}
++}
+-- 
+2.53.0
+
