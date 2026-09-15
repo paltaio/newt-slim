@@ -296,6 +296,11 @@ native_stop() {
         FOUND=1
     fi
 
+    if [ -x "/etc/init.d/S99${NAME}" ]; then
+        "/etc/init.d/S99${NAME}" stop >/dev/null 2>&1 || true
+        FOUND=1
+    fi
+
     if [ "$FOUND" -eq 1 ]; then
         echo "stopped service: $NAME"
     else
@@ -336,6 +341,12 @@ native_uninstall() {
             "/etc/init.d/${NAME}" disable >/dev/null 2>&1 || true
         fi
         rm -f "/etc/init.d/${NAME}"
+        FOUND=1
+    fi
+
+    if [ -x "/etc/init.d/S99${NAME}" ]; then
+        "/etc/init.d/S99${NAME}" stop >/dev/null 2>&1 || true
+        rm -f "/etc/init.d/S99${NAME}"
         FOUND=1
     fi
 
@@ -556,6 +567,8 @@ elif [ -d /run/systemd/system ]; then
     INIT=systemd
 elif command -v rc-update >/dev/null 2>&1; then
     INIT=openrc
+elif [ -f /etc/inittab ] && [ -x /etc/init.d/rcS ]; then
+    INIT=busybox
 else
     echo "unsupported init system" >&2
     exit 1
@@ -794,6 +807,50 @@ EOF
         rc-update add "$NAME" default >/dev/null
         rc-service "$NAME" restart
         LOGS_CMD="tail -f /var/log/$NAME.log"
+        ;;
+    busybox)
+        # rcS runs /etc/init.d/S??* start at boot.
+        SVC="/etc/init.d/S99${NAME}"
+        LOG="/var/log/${NAME}.log"
+        cat > "$SVC" <<EOF
+#!/bin/sh
+PIDFILE=/var/run/${NAME}.pid
+LOOP_PIDFILE=/var/run/${NAME}.loop.pid
+
+stop() {
+    for f in "\$LOOP_PIDFILE" "\$PIDFILE"; do
+        [ -f "\$f" ] || continue
+        kill "\$(cat "\$f")" 2>/dev/null
+        rm -f "\$f"
+    done
+}
+
+start() {
+    [ -r "$ENV_FILE" ] || { echo "missing $ENV_FILE" >&2; return 1; }
+    stop
+    (
+        set -a
+        . "$ENV_FILE"
+        set +a
+        while :; do
+            "$BIN" > "$LOG" 2>&1 &
+            echo \$! > "\$PIDFILE"
+            wait \$!
+            sleep 5
+        done
+    ) < /dev/null > /dev/null 2>&1 &
+    echo \$! > "\$LOOP_PIDFILE"
+}
+
+case "\$1" in
+    start|restart) start ;;
+    stop) stop ;;
+    *) echo "usage: \$0 {start|stop|restart}" >&2; exit 1 ;;
+esac
+EOF
+        chmod +x "$SVC"
+        "$SVC" restart
+        LOGS_CMD="tail -f $LOG"
         ;;
 esac
 

@@ -11,11 +11,11 @@ Run once:
 curl -fsSL https://raw.githubusercontent.com/paltaio/newt-slim/main/install.sh | sh
 ```
 
-It detects the arch and init system (procd, systemd, openrc), downloads the
-matching binary, then prompts you to paste the `newt --id ... --secret ...
---endpoint ...` line and registers a service. When run without root, it asks
-before installing a user service. If Docker is available, it can install a
-container instead.
+It detects the arch and init system (procd, systemd, openrc, BusyBox init),
+downloads the matching binary, then prompts you to paste the `newt --id ...
+--secret ... --endpoint ...` line and registers a service. When run without
+root, it asks before installing a user service. If Docker is available, it can
+install a container instead.
 
 For options, download the installer:
 
@@ -34,8 +34,8 @@ Re-prompt for credentials with `--update`. Pin a release with `--tag 1.12.5`.
 Use `--no-upx` if the UPX binary fails to run.
 
 Credentials live in `/etc/newt/<name>.env` (mode 0600). The service unit is
-`/etc/init.d/<name>` on procd/openrc or `/etc/systemd/system/<name>.service`
-on systemd.
+`/etc/init.d/<name>` on procd/openrc, `/etc/systemd/system/<name>.service`
+on systemd, or `/etc/init.d/S99<name>` on BusyBox init (Buildroot).
 
 Install as a Docker container with `--docker`:
 
