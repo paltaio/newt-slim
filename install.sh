@@ -23,6 +23,8 @@ UNINSTALL=0
 DOCKER_CMD=
 DOCKER_COMPOSE=
 USER_INSTALL=0
+SERVICE_DIR=
+CRON=0
 ANDROID=0
 ANDROID_MODE=
 MOD_DIR=
@@ -31,7 +33,7 @@ TERMUX_NOTE=0
 
 usage() {
     cat <<EOF
-install.sh [--name NAME] [--tag TAG] [--update] [--no-upx] [--docker]
+install.sh [--name NAME] [--tag TAG] [--update] [--no-upx] [--docker] [--service-dir DIR]
 install.sh [--name NAME] [--docker] --stop
 install.sh [--name NAME] [--docker] --uninstall
 
@@ -41,6 +43,9 @@ install.sh [--name NAME] [--docker] --uninstall
   --update      Re-prompt for credentials and overwrite the env file.
   --no-upx      Use the uncompressed binary.
   --docker      Run newt as a Docker container.
+  --service-dir DIR
+                BusyBox init only: directory for the S99<name> script
+                (default: /etc/init.d). Pass it again with --stop/--uninstall.
   --stop        Stop the service or container and keep its credentials.
   --uninstall   Stop and remove the service or container and credentials.
   --remove      Alias for --uninstall.
@@ -56,6 +61,10 @@ while [ $# -gt 0 ]; do
         --tag)
             [ $# -ge 2 ] || { echo "--tag requires a value" >&2; exit 2; }
             TAG="$2"; shift 2
+            ;;
+        --service-dir)
+            [ $# -ge 2 ] || { echo "--service-dir requires a value" >&2; exit 2; }
+            SERVICE_DIR="$2"; shift 2
             ;;
         --update) UPDATE=1; shift ;;
         --no-upx) NO_UPX=1; shift ;;
@@ -273,6 +282,12 @@ EOF
     echo "  logs: $DOCKER_CMD logs -f $NAME"
 }
 
+remove_cron_entry() {
+    command -v crontab >/dev/null 2>&1 || return 0
+    crontab -l 2>/dev/null | grep -qF "/etc/init.d/S99${NAME} start" || return 0
+    crontab -l | grep -vF "/etc/init.d/S99${NAME} start" | crontab -
+}
+
 native_stop() {
     FOUND=0
 
@@ -296,10 +311,12 @@ native_stop() {
         FOUND=1
     fi
 
-    if [ -x "/etc/init.d/S99${NAME}" ]; then
-        "/etc/init.d/S99${NAME}" stop >/dev/null 2>&1 || true
+    remove_cron_entry
+    for f in "/etc/init.d/S99${NAME}" ${SERVICE_DIR:+"${SERVICE_DIR}/S99${NAME}"}; do
+        [ -x "$f" ] || continue
+        "$f" stop >/dev/null 2>&1 || true
         FOUND=1
-    fi
+    done
 
     if [ "$FOUND" -eq 1 ]; then
         echo "stopped service: $NAME"
@@ -344,11 +361,13 @@ native_uninstall() {
         FOUND=1
     fi
 
-    if [ -x "/etc/init.d/S99${NAME}" ]; then
-        "/etc/init.d/S99${NAME}" stop >/dev/null 2>&1 || true
-        rm -f "/etc/init.d/S99${NAME}"
+    remove_cron_entry
+    for f in "/etc/init.d/S99${NAME}" ${SERVICE_DIR:+"${SERVICE_DIR}/S99${NAME}"}; do
+        [ -x "$f" ] || continue
+        "$f" stop >/dev/null 2>&1 || true
+        rm -f "$f"
         FOUND=1
-    fi
+    done
 
     if [ "$FOUND" -eq 1 ]; then
         echo "removed service: $NAME"
@@ -569,6 +588,17 @@ elif command -v rc-update >/dev/null 2>&1; then
     INIT=openrc
 elif [ -f /etc/inittab ] && [ -x /etc/init.d/rcS ]; then
     INIT=busybox
+    # rcS lists /etc/init.d/S??* once. A script that pivots root onto an
+    # overlay hides anything installed there afterwards from that list.
+    if [ -z "$SERVICE_DIR" ] && grep -qs pivot_root /etc/init.d/S??*; then
+        if pidof crond >/dev/null 2>&1 && command -v crontab >/dev/null 2>&1; then
+            CRON=1
+        else
+            echo "an /etc/init.d script pivots the root filesystem, so rcS would not run S99${NAME} at boot." >&2
+            echo "pass --service-dir with a directory the firmware runs at boot after the pivot, or start crond." >&2
+            exit 1
+        fi
+    fi
 else
     echo "unsupported init system" >&2
     exit 1
@@ -809,8 +839,8 @@ EOF
         LOGS_CMD="tail -f /var/log/$NAME.log"
         ;;
     busybox)
-        # rcS runs /etc/init.d/S??* start at boot.
-        SVC="/etc/init.d/S99${NAME}"
+        SVC="${SERVICE_DIR:-/etc/init.d}/S99${NAME}"
+        mkdir -p "${SVC%/*}"
         LOG="/var/log/${NAME}.log"
         cat > "$SVC" <<EOF
 #!/bin/sh
@@ -827,7 +857,7 @@ stop() {
 
 start() {
     [ -r "$ENV_FILE" ] || { echo "missing $ENV_FILE" >&2; return 1; }
-    stop
+    [ -f "\$LOOP_PIDFILE" ] && kill -0 "\$(cat "\$LOOP_PIDFILE")" 2>/dev/null && return 0
     (
         set -a
         . "$ENV_FILE"
@@ -843,13 +873,18 @@ start() {
 }
 
 case "\$1" in
-    start|restart) start ;;
+    start) start ;;
     stop) stop ;;
+    restart) stop; start ;;
     *) echo "usage: \$0 {start|stop|restart}" >&2; exit 1 ;;
 esac
 EOF
         chmod +x "$SVC"
         "$SVC" restart
+        if [ "$CRON" -eq 1 ]; then
+            CRON_LINE="* * * * * $SVC start >/dev/null 2>&1"
+            { crontab -l 2>/dev/null | grep -vF "$SVC start"; echo "$CRON_LINE"; } | crontab -
+        fi
         LOGS_CMD="tail -f $LOG"
         ;;
 esac
@@ -861,5 +896,6 @@ echo "  service: $SVC"
 echo "  binary: $BIN"
 echo "  credentials: $ENV_FILE"
 echo "  logs: $LOGS_CMD"
+[ "$CRON" -eq 0 ] || echo "  crontab: $CRON_LINE"
 [ "$REBOOT_NOTE" -eq 0 ] || echo "reboot to start newt."
 [ "$TERMUX_NOTE" -eq 0 ] || echo "install the Termux:Boot app and open it once so the boot script runs."

@@ -35,7 +35,11 @@ Use `--no-upx` if the UPX binary fails to run.
 
 Credentials live in `/etc/newt/<name>.env` (mode 0600). The service unit is
 `/etc/init.d/<name>` on procd/openrc, `/etc/systemd/system/<name>.service`
-on systemd, or `/etc/init.d/S99<name>` on BusyBox init (Buildroot).
+on systemd, or `/etc/init.d/S99<name>` on BusyBox init (Buildroot). On
+BusyBox init, `--service-dir DIR` puts the script in `DIR` instead; pass it
+again with `--stop` and `--uninstall`. If an `/etc/init.d` script pivots the
+root filesystem and `--service-dir` is not set, the installer adds a crontab
+entry that starts newt when it is not running. `--stop` removes that entry.
 
 Install as a Docker container with `--docker`:
 
