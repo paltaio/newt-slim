@@ -1,4 +1,4 @@
-From c778f11a37ca67866123ff5e71809bb958fcd8a5 Mon Sep 17 00:00:00 2001
+From e9862fa04dc2c66ca8290bde49f7165a8c1a2c5e Mon Sep 17 00:00:00 2001
 From: Mauricio Allende <mauricio@palta.io>
 Date: Wed, 13 May 2026 21:42:38 -0400
 Subject: [PATCH] Add minimal build tag to gate telemetry, docker, updates, and
@@ -22,13 +22,13 @@ that omits roughly two thirds of the linked code.
  internal/telemetry/constants.go           |  6 ++
  internal/telemetry/metrics.go             |  8 +--
  internal/telemetry/metrics_test_helper.go |  2 +
- internal/telemetry/minimal.go             | 82 +++++++++++++++++++++++
+ internal/telemetry/minimal.go             | 83 +++++++++++++++++++++++
  internal/telemetry/state_view.go          |  2 +
  internal/telemetry/telemetry.go           |  8 +++
  main.go                                   |  3 +-
  updates/minimal.go                        |  5 ++
  updates/updates.go                        |  2 +
- 18 files changed, 227 insertions(+), 10 deletions(-)
+ 18 files changed, 228 insertions(+), 10 deletions(-)
  create mode 100644 authdaemon/minimal.go
  create mode 100644 docker/minimal.go
  create mode 100644 internal/telemetry/minimal.go
@@ -236,7 +236,7 @@ index bc117bf..8726016 100644
 +	ProxyConnectionClosed = "closed"
 +)
 diff --git a/internal/telemetry/metrics.go b/internal/telemetry/metrics.go
-index 6c34724..6430ba1 100644
+index 70be83b..a6ff99d 100644
 --- a/internal/telemetry/metrics.go
 +++ b/internal/telemetry/metrics.go
 @@ -1,3 +1,5 @@
@@ -270,10 +270,10 @@ index 16aa1a3..6050cba 100644
  import (
 diff --git a/internal/telemetry/minimal.go b/internal/telemetry/minimal.go
 new file mode 100644
-index 0000000..35a0411
+index 0000000..2050ae8
 --- /dev/null
 +++ b/internal/telemetry/minimal.go
-@@ -0,0 +1,82 @@
+@@ -0,0 +1,83 @@
 +//go:build minimal
 +
 +package telemetry
@@ -316,14 +316,15 @@ index 0000000..35a0411
 +	ActiveSessions(siteID string) (n int64, ok bool)
 +}
 +
-+func FromEnv() Config                                    { return Config{} }
-+func Init(context.Context, Config) (*Setup, error)       { return &Setup{}, nil }
-+func (s *Setup) Shutdown(context.Context) error          { return nil }
++func FromEnv() Config                                       { return Config{} }
++func Init(context.Context, Config) (*Setup, error)          { return &Setup{}, nil }
++func (s *Setup) Shutdown(context.Context) error             { return nil }
 +func WrapHTTPHandler(h http.Handler, _ string) http.Handler { return h }
++func EnsureInstruments() error                              { return nil }
 +
-+func UpdateSiteInfo(string, string)                  {}
-+func RegisterStateView(StateView)                    {}
-+func RegisterBuildInfo(string, string)               {}
++func UpdateSiteInfo(string, string)                                           {}
++func RegisterStateView(StateView)                                             {}
++func RegisterBuildInfo(string, string)                                        {}
 +func SetObservableCallback(func(context.Context, metric.Observer) error)      {}
 +func SetProxyObservableCallback(func(context.Context, metric.Observer) error) {}
 +
@@ -397,18 +398,18 @@ index 3d47a61..01769a0 100644
  //
  // Defaults align with the issue requirements:
 diff --git a/main.go b/main.go
-index 38c0583..0fed564 100644
+index 22f0535..93fdb00 100644
 --- a/main.go
 +++ b/main.go
-@@ -18,7 +18,6 @@ import (
- 	newtpkg "github.com/fosrl/newt/newt"
+@@ -19,7 +19,6 @@ import (
+ 	"github.com/fosrl/newt/newtconfig"
  	"github.com/fosrl/newt/updates"
  	"github.com/fosrl/newt/websocket"
 -	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
  )
  
  var (
-@@ -149,7 +148,7 @@ func runNewtMain(ctx context.Context) {
+@@ -157,7 +156,7 @@ func runNewtMain(ctx context.Context) {
  		}
  		admin := &http.Server{
  			Addr:              tcfg.AdminAddr,
@@ -429,7 +430,7 @@ index 0000000..7aead02
 +
 +func CheckForUpdate(string, string, string) error { return nil }
 diff --git a/updates/updates.go b/updates/updates.go
-index 10bf38e..5fd4e10 100644
+index b3fa423..b89d9d0 100644
 --- a/updates/updates.go
 +++ b/updates/updates.go
 @@ -1,3 +1,5 @@
@@ -439,5 +440,5 @@ index 10bf38e..5fd4e10 100644
  
  import (
 -- 
-2.53.0
+2.47.3
 

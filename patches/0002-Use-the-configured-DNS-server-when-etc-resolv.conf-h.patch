@@ -1,4 +1,4 @@
-From d645bf6db5c832ab7486e8a9e67fd148adca9b33 Mon Sep 17 00:00:00 2001
+From 5776949748dd78bdf65fd02f9844c485311571a9 Mon Sep 17 00:00:00 2001
 From: Mauricio Allende <mauricio@palta.io>
 Date: Thu, 3 Sep 2026 12:05:15 -0400
 Subject: [PATCH] Use the configured DNS server when /etc/resolv.conf has no
@@ -11,10 +11,10 @@ Subject: [PATCH] Use the configured DNS server when /etc/resolv.conf has no
  create mode 100644 resolver.go
 
 diff --git a/main.go b/main.go
-index 0fed564..a5bbf5f 100644
+index 93fdb00..48fcb94 100644
 --- a/main.go
 +++ b/main.go
-@@ -92,6 +92,7 @@ func runNewtMain(ctx context.Context) {
+@@ -100,6 +100,7 @@ func runNewtMain(ctx context.Context) {
  	if cfg.DNS != "" {
  		logger.Debug("DNS: %v", cfg.DNS)
  	}
@@ -74,5 +74,5 @@ index 0000000..57f8f37
 +	}
 +}
 -- 
-2.53.0
+2.47.3
 
