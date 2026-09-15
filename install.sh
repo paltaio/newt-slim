@@ -884,7 +884,13 @@ EOF
         "$SVC" restart
         if [ "$CRON" -eq 1 ]; then
             CRON_LINE="* * * * * $SVC start >/dev/null 2>&1"
-            { crontab -l 2>/dev/null | grep -vF "$SVC start"; echo "$CRON_LINE"; } | crontab -
+            # grep exits 1 when the crontab holds no other lines; set -e must
+            # not kill the group before the entry is written.
+            { crontab -l 2>/dev/null | grep -vF "$SVC start" || true; echo "$CRON_LINE"; } | crontab -
+            crontab -l 2>/dev/null | grep -qF "$CRON_LINE" || {
+                echo "crontab did not keep the entry; reinstall with --service-dir." >&2
+                exit 1
+            }
         fi
         LOGS_CMD="tail -f $LOG"
         ;;
