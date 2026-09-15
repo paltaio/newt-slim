@@ -606,9 +606,10 @@ fi
 
 # --- resolve tag ---
 if [ -z "$TAG" ]; then
-    TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
-        | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' \
-        | head -n1)
+    # The API rate-limits unauthenticated callers; this redirect does not.
+    TAG=$(curl -fsSL -o /dev/null -w '%{url_effective}' \
+        "https://github.com/${REPO}/releases/latest" \
+        | sed -n 's#.*/releases/tag/##p')
     [ -n "$TAG" ] || { echo "could not resolve latest tag" >&2; exit 1; }
 fi
 case "$TAG" in
