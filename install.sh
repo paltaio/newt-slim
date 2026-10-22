@@ -561,11 +561,12 @@ case "$m" in
     armv6*)         SUFFIX=linux-armv6 ;;
     riscv64)        SUFFIX=linux-riscv64 ;;
     mips*)
-        endian=$(printf '\1\2' | od -An -tx2 | tr -d ' \n')
+        # EI_DATA byte of the ELF header: 1 = little-endian, 2 = big-endian
+        endian=$(dd if=/bin/sh bs=1 skip=5 count=1 2>/dev/null)
         case "$endian" in
-            0201) SUFFIX=linux-mipsle-softfloat ;;
-            0102) SUFFIX=linux-mips-softfloat ;;
-            *) echo "cannot detect mips endianness ($endian)" >&2; exit 1 ;;
+            "$(printf '\1')") SUFFIX=linux-mipsle-softfloat ;;
+            "$(printf '\2')") SUFFIX=linux-mips-softfloat ;;
+            *) echo "cannot detect mips endianness" >&2; exit 1 ;;
         esac
         ;;
     *) echo "unsupported arch: $m" >&2; exit 1 ;;
