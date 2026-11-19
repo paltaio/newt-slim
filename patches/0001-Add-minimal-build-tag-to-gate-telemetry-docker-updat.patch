@@ -1,4 +1,4 @@
-From e9862fa04dc2c66ca8290bde49f7165a8c1a2c5e Mon Sep 17 00:00:00 2001
+From 6c78166298d1d3d0646ed16453d670d402f5e7ce Mon Sep 17 00:00:00 2001
 From: Mauricio Allende <mauricio@palta.io>
 Date: Wed, 13 May 2026 21:42:38 -0400
 Subject: [PATCH] Add minimal build tag to gate telemetry, docker, updates, and
@@ -13,19 +13,19 @@ that omits roughly two thirds of the linked code.
  authdaemon/connection.go                  |  2 +
  authdaemon/host_linux.go                  |  2 +-
  authdaemon/host_stub.go                   |  2 +-
- authdaemon/minimal.go                     | 45 +++++++++++++
+ authdaemon/minimal.go                     | 45 ++++++++++++
  authdaemon/principals.go                  |  2 +
  authdaemon/routes.go                      |  2 +
  authdaemon/server.go                      |  2 +
  docker/docker.go                          |  2 +
- docker/minimal.go                         | 60 +++++++++++++++++
+ docker/minimal.go                         | 60 ++++++++++++++++
  internal/telemetry/constants.go           |  6 ++
  internal/telemetry/metrics.go             |  8 +--
  internal/telemetry/metrics_test_helper.go |  2 +
  internal/telemetry/minimal.go             | 83 +++++++++++++++++++++++
  internal/telemetry/state_view.go          |  2 +
  internal/telemetry/telemetry.go           |  8 +++
- main.go                                   |  3 +-
+ newt/telemetry.go                         |  3 +-
  updates/minimal.go                        |  5 ++
  updates/updates.go                        |  2 +
  18 files changed, 228 insertions(+), 10 deletions(-)
@@ -397,19 +397,19 @@ index 3d47a61..01769a0 100644
  // Config controls telemetry initialization via env flags.
  //
  // Defaults align with the issue requirements:
-diff --git a/main.go b/main.go
-index 22f0535..93fdb00 100644
---- a/main.go
-+++ b/main.go
-@@ -19,7 +19,6 @@ import (
- 	"github.com/fosrl/newt/newtconfig"
- 	"github.com/fosrl/newt/updates"
- 	"github.com/fosrl/newt/websocket"
+diff --git a/newt/telemetry.go b/newt/telemetry.go
+index 187af33..a1c6357 100644
+--- a/newt/telemetry.go
++++ b/newt/telemetry.go
+@@ -10,7 +10,6 @@ import (
+ 
+ 	"github.com/fosrl/newt/internal/telemetry"
+ 	"github.com/fosrl/newt/logger"
 -	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
  )
  
- var (
-@@ -157,7 +156,7 @@ func runNewtMain(ctx context.Context) {
+ // StartTelemetry initialises the OpenTelemetry exporters (Prometheus/OTLP)
+@@ -73,7 +72,7 @@ func (n *Newt) StartTelemetry(ctx context.Context) (shutdown func()) {
  		}
  		admin := &http.Server{
  			Addr:              tcfg.AdminAddr,
